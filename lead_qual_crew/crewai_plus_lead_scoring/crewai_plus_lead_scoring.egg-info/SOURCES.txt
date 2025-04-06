@@ -1,0 +1,12 @@
+setup.py
+crewai_plus_lead_scoring.egg-info/PKG-INFO
+crewai_plus_lead_scoring.egg-info/SOURCES.txt
+crewai_plus_lead_scoring.egg-info/dependency_links.txt
+crewai_plus_lead_scoring.egg-info/requires.txt
+crewai_plus_lead_scoring.egg-info/top_level.txt
+tests/__init__.py
+tests/test_agents.py
+tests/test_lead_scoring.py
+tools/__init__.py
+tools/custom_tool.py
+tools/lead_scoring_tools.py
