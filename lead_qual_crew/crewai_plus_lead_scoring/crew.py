@@ -34,9 +34,9 @@ class LeadScoringCrew:
         """Determine lead priority enum based on score."""
         if score >= 85:
             return LeadStatus.money
-        elif score >= 70:
+        elif score >= 60:
             return LeadStatus.hot
-        elif score >= 50:
+        elif score >= 40:
             return LeadStatus.warm
         else:
             return LeadStatus.cold
