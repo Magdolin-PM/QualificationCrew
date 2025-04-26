@@ -102,7 +102,7 @@ class Lead(Base):
     __table_args__ = {'schema': 'public'}
 
     id = Column(PG_UUID, primary_key=True, server_default=text('gen_random_uuid()'))
-    user_id = Column(PG_UUID, ForeignKey('public.user_id', ondelete='CASCADE'), nullable=False)
+    user_id = Column(PG_UUID, ForeignKey('public.users.user_id', ondelete='CASCADE'), nullable=False)
     first_name = Column(Text)
     last_name = Column(Text)
     email = Column(Text)
@@ -132,7 +132,7 @@ class Lead(Base):
     
     # Relationship with signals (defined here, after Signal class)
     signals = relationship("Signal", back_populates="lead")
-    # Relationship with creator profile (defined here, after UserProfile class)
+    # Relationship with creator profile
     creator = relationship("Users", back_populates="leads_created")
 
 # Define back-populating relationships after all classes are defined
