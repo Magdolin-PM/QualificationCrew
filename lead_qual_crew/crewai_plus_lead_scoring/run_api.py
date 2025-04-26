@@ -2,6 +2,10 @@ import os
 import sys
 import uvicorn
 from dotenv import load_dotenv
+import sqlalchemy
+import psycopg2
+import socket
+from urllib.parse import urlparse
 
 # --- Define Project Root and Add to Path ---
 # Assuming this script is in crewAI-enterprise-lead-ql-assist/that's the one/crewai_plus_lead_scoring/
@@ -18,25 +22,40 @@ if os.path.exists(dotenv_path):
 else:
     print(f"Warning: Root .env file not found at {dotenv_path}")
 
-# --- Remove Old .env Loading --- 
-# # Load environment variables
-# dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
-# if os.path.exists(dotenv_path):
-#     load_dotenv(dotenv_path=dotenv_path)
-#     print(f"Loaded environment variables from {dotenv_path}")
-# else:
-#     parent_dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
-#     if os.path.exists(parent_dotenv_path):
-#         load_dotenv(dotenv_path=parent_dotenv_path)
-#         print(f"Loaded environment variables from parent directory: {parent_dotenv_path}")
-# ---
+# --- Direct Socket Connection Test ---
+db_url = os.getenv("DATABASE_URL")
+if db_url:
+    print("\n--- Attempting direct socket connection test ---")
+    try:
+        # --- Test Google First ---
+        print("Attempting to resolve google.com...")
+        google_ip = socket.gethostbyname("google.com")
+        print(f"Resolved google.com to IP: {google_ip}")
+        # --- End Google Test ---
 
-# --- Remove Old Path Setup ---
-# # Add current directory to path if not already there
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# if current_dir not in sys.path:
-#     sys.path.insert(0, current_dir)
-# ---
+        parsed = urlparse(db_url)
+        hostname = parsed.hostname
+        port = parsed.port or 5432 # Default PG port if not specified
+        if hostname:
+            print(f"Attempting to resolve and connect to {hostname}:{port}...")
+            # Attempt DNS resolution
+            ip_address = socket.gethostbyname(hostname)
+            print(f"Resolved {hostname} to IP: {ip_address}")
+            # Attempt connection
+            with socket.create_connection((hostname, port), timeout=5) as sock:
+                print(f"Direct socket connection test to {hostname}:{port} SUCCEEDED.")
+        else:
+            print("Could not parse hostname from DATABASE_URL.")
+    except socket.gaierror as e: # Specifically catch DNS errors
+        print(f"Direct socket connection test FAILED (DNS Resolution Error - socket.gaierror): {e}")
+    except socket.error as e:
+        print(f"Direct socket connection test FAILED (Socket Connection Error): {e}")
+    except Exception as e:
+        print(f"Direct socket connection test FAILED (Other Error): {e}")
+    print("--- End direct socket connection test ---\n")
+else:
+    print("DATABASE_URL not found in environment, skipping direct socket test.")
+# --- End Test ---
 
 # Run the API server
 if __name__ == "__main__":
@@ -55,7 +74,7 @@ if __name__ == "__main__":
             app_module, 
             host="0.0.0.0", 
             port=8000, 
-            reload=True, 
+            reload=False, # <-- Disable reloader for testing
         )
     except Exception as e:
         print(f"\nError starting server: {e}")

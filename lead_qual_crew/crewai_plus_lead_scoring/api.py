@@ -1,5 +1,5 @@
 import logging
-from fastapi import FastAPI, HTTPException, Body, Depends
+from fastapi import FastAPI, HTTPException, Body, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware  # Add CORS middleware
 from fastapi.responses import HTMLResponse  # Add HTMLResponse
 from uuid import UUID
@@ -46,7 +46,7 @@ else:
 # ---
 
 # --- Use Relative Imports ---
-from .database import get_unprocessed_lead_ids, get_lead_priority_summary # Relative import
+from .database import get_unprocessed_lead_ids, get_lead_status_summary # Relative import
 # Remove the direct import of process_lead
 # from .process_lead import process_lead # Relative import
 # Import the LeadScoringCrew
@@ -98,23 +98,77 @@ class Contact(BaseModel):
 class ProcessBatchRequest(BaseModel):
     contacts_data: List[Contact] = [] # Default to empty list
 
-class BatchProcessSummary(BaseModel):
-    total_processed: int
-    successful: int
-    failed: int
-    errors: List[Dict[str, str]] # List of {lead_id: ..., error: ...}
+# New response model for the async endpoint
+class BatchStartResponse(BaseModel):
+    message: str
+    user_id: str
+    leads_queued: int
 
-# Endpoints
-@app.post("/users/{user_id_str}/leads/process-batch", response_model=BatchProcessSummary)
-def trigger_sync_batch_lead_processing(
+# --- Background Task Function ---
+# This function will run in the background
+def run_scoring_batch_background(
     user_id_str: str, 
+    lead_ids_to_process: List[UUID], 
+    contacts_list_of_dicts: List[Dict],
+    serper_api_key: str # API key needs to be passed explicitly
+):
+    """Instantiates crew and processes leads in the background."""
+    logging.info(f"[Background Task] Starting processing for User ID: {user_id_str}")
+    
+    # Instantiate the crew inside the background task
+    try:
+        # Note: Consider if LeadScoringCrew instantiation itself is slow or resource-intensive.
+        # If so, it might be better shared or pre-initialized, but this is simpler.
+        crew = LeadScoringCrew(serper_api_key=serper_api_key)
+    except Exception as e:
+        logging.error(f"[Background Task] Failed to initialize LeadScoringCrew for User ID {user_id_str}: {e}", exc_info=True)
+        # Cannot easily report back to user here, rely on logs.
+        return # Stop processing if crew cannot be initialized
+        
+    processed_count = 0
+    success_count = 0
+    failure_count = 0
+    
+    for lead_id in lead_ids_to_process:
+        lead_id_str = str(lead_id)
+        logging.info(f"[Background Task] Processing lead {lead_id_str} for User ID {user_id_str}...")
+        try:
+            result = crew.process_single_lead(
+                lead_id=lead_id_str, 
+                user_id=user_id_str,
+                contacts_data=contacts_list_of_dicts
+            )
+            processed_count += 1
+            if "error" in result:
+                logging.warning(f"[Background Task] Processing failed for lead {lead_id_str}: {result.get('error', 'Unknown error')}")
+                failure_count += 1
+            else:
+                # Log success details (e.g., score) from the result dictionary
+                logging.info(f"[Background Task] Processing succeeded for lead {lead_id_str}. Result keys: {list(result.keys())}, Score: {result.get('score')}")
+                success_count += 1
+                
+        except Exception as e:
+            # Catch unexpected errors during a single lead's processing in background
+            logging.error(f"[Background Task] Unexpected error during processing lead {lead_id_str} for User ID {user_id_str}: {e}", exc_info=True)
+            failure_count += 1 # Count unexpected errors as failures
+            processed_count += 1 # It was attempted
+
+    logging.info(f"[Background Task] Batch processing complete for User ID {user_id_str}. Processed: {processed_count}, Successful: {success_count}, Failed: {failure_count}")
+    # NOTE: No return value is sent back to the original HTTP request here.
+    # Further actions like DB logging of batch status or notifications would go here.
+
+# --- API Endpoints ---
+# Update the endpoint to use BackgroundTasks and return BatchStartResponse
+@app.post("/users/{user_id_str}/leads/process-batch", response_model=BatchStartResponse)
+def trigger_async_batch_lead_processing(
+    user_id_str: str, 
+    background_tasks: BackgroundTasks, # Inject BackgroundTasks
     request_data: ProcessBatchRequest = Body(default=ProcessBatchRequest(contacts_data=[])),
-    # Remove BackgroundTasks dependency
-    serper_api_key: str = Depends(get_api_key) # Inject API key via dependency
+    serper_api_key: str = Depends(get_api_key) # Resolve API key here
 ):
     """
-    Processes up to 10 unprocessed leads SYNCHRONOUSLY for a given user.
-    Returns an aggregated summary of the batch processing results.
+    Triggers ASYNCHRONOUS processing for up to 20 unprocessed leads for a given user.
+    Immediately returns a confirmation that processing has started.
     Requires user's contacts data in the request body.
     """
     try:
@@ -122,83 +176,54 @@ def trigger_sync_batch_lead_processing(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid user ID format: {user_id_str}")
 
-    logging.info(f"Fetching unprocessed leads for User ID: {user_id}")
+    logging.info(f"Received request to process leads for User ID: {user_id}")
     
     try:
-        lead_ids_to_process = get_unprocessed_lead_ids(user_id=user_id, limit=10)
+        # Fetch up to 20 leads
+        lead_ids_to_process = get_unprocessed_lead_ids(user_id=user_id, limit=20)
     except Exception as e:
         logging.error(f"Database error fetching leads for User ID {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error fetching leads from database.")
 
     if not lead_ids_to_process:
-        logging.info(f"No unprocessed leads found for User ID: {user_id}")
-        # Return empty summary if no leads found
-        return BatchProcessSummary(total_processed=0, successful=0, failed=0, errors=[])
+        logging.info(f"No unprocessed leads found for User ID: {user_id}. Nothing to queue.")
+        # Return slightly different message if nothing to do
+        return BatchStartResponse(
+            message="No unprocessed leads found to queue.", 
+            user_id=user_id_str, 
+            leads_queued=0
+        )
 
     contacts_list_of_dicts = []
     if request_data and request_data.contacts_data:
         contacts_list_of_dicts = [contact.model_dump(exclude_unset=True) for contact in request_data.contacts_data]
         logging.info(f"Received {len(contacts_list_of_dicts)} contacts in request body.")
     else:
-        logging.warning(f"No contacts data received in request body for user {user_id}. Domain matching will be skipped.")
+        logging.warning(f"No contacts data received in request body for user {user_id}. Domain matching will be skipped in background task.")
 
-    # Instantiate the crew ONCE outside the loop
-    try:
-        crew = LeadScoringCrew(serper_api_key=serper_api_key)
-    except Exception as e:
-        logging.error(f"Failed to initialize LeadScoringCrew: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to initialize scoring crew.")
-
-    # Process leads synchronously
-    results = []
-    logging.info(f"Starting synchronous processing of {len(lead_ids_to_process)} leads for User ID: {user_id}")
-    
-    for lead_id in lead_ids_to_process:
-        lead_id_str = str(lead_id)
-        logging.info(f"Processing lead {lead_id_str}...")
-        try:
-            # Call process_single_lead directly
-            result = crew.process_single_lead(
-                lead_id=lead_id_str, 
-                user_id=user_id_str,
-                contacts_data=contacts_list_of_dicts
-            )
-            results.append(result)
-            if "error" in result:
-                logging.warning(f"Processing failed for lead {lead_id_str}: {result['error']}")
-            else:
-                logging.info(f"Processing succeeded for lead {lead_id_str}. Score: {result.get('score')}")
-                
-        except Exception as e:
-            # Catch unexpected errors during a single lead's processing
-            logging.error(f"Unexpected error during processing lead {lead_id_str}: {e}", exc_info=True)
-            results.append({"error": f"Unexpected processing error: {str(e)}", "lead_id": lead_id_str})
-
-    # Calculate summary
-    successful_count = 0
-    failed_count = 0
-    error_list = []
-    for res in results:
-        if "error" in res:
-            failed_count += 1
-            error_list.append({"lead_id": res.get("lead_id", "Unknown"), "error": res.get("error", "Unknown")})
-        else:
-            successful_count += 1
-            
-    total_processed = len(results)
-    summary = BatchProcessSummary(
-        total_processed=total_processed,
-        successful=successful_count,
-        failed=failed_count,
-        errors=error_list
+    # Add the processing function to background tasks
+    background_tasks.add_task(
+        run_scoring_batch_background,
+        user_id_str=user_id_str, # Pass needed arguments
+        lead_ids_to_process=lead_ids_to_process,
+        contacts_list_of_dicts=contacts_list_of_dicts,
+        serper_api_key=serper_api_key 
     )
-    
-    logging.info(f"Batch processing complete for user {user_id}. Summary: {summary.model_dump()}")
-    return summary
+
+    num_leads = len(lead_ids_to_process)
+    logging.info(f"Queued background processing for {num_leads} leads for User ID: {user_id}")
+
+    # Return immediate confirmation
+    return BatchStartResponse(
+        message=f"Started background processing for {num_leads} leads.",
+        user_id=user_id_str,
+        leads_queued=num_leads
+    )
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Root endpoint with HTML interface to test the API"""
+    # Restore the original complex HTML
     html_content = """
     <!DOCTYPE html>
     <html lang="en">
@@ -231,8 +256,8 @@ async def root():
             <div class="user-input">
                 <label for="contactsData">Contacts Data (JSON list of objects with 'email', 'name', etc.):</label><br>
                 <textarea id="contactsData">[
-  {{"name": "Test Contact", "email": "test@matchingdomain.com"}},
-  {{"name": "No Match Contact", "email": "nomatch@otherdomain.net"}}
+  {"name": "Test Contact", "email": "test@matchingdomain.com"},
+  {"name": "No Match Contact", "email": "nomatch@otherdomain.net"}
 ]</textarea>
             </div>
             <button onclick="callSyncBatchApi()">Process Leads Synchronously</button>
@@ -294,6 +319,7 @@ async def root():
     </html>
     """
     return HTMLResponse(content=html_content)
+    # return "Hello World!" # Comment out the simplified version
 
 # Add a debugging endpoint
 @app.get("/debug/leads")
@@ -345,7 +371,7 @@ async def get_user_lead_summary(user_id_str: str):
     logging.info(f"Fetching lead summary for User ID: {user_id}")
     
     try:
-        summary = get_lead_priority_summary(user_id=user_id)
+        summary = get_lead_status_summary(user_id=user_id)
         return summary
     except Exception as e:
         logging.error(f"Database error fetching lead summary for User ID {user_id}: {e}", exc_info=True)

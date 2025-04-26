@@ -1,83 +1,104 @@
-lead_analysis_task:
+# Tasks based on the current Python implementation
+
+focused_enrich_lead_task:
   description: >
-    Analyze the lead's form responses to extract critical information that
-    might be useful for scoring them, planning a strategy to pitch them,
-    or anything that might be helpful for taking next steps on selling
-    them our {product_name}.
+    **Goal:** Extract SEO keywords and metadata *only from the home page (root domain)* of the specific lead's website.
+    
+    **Context:** You will receive input context containing lead details, including a '{website}' key which might contain a full URL with paths (e.g., http://example.com/some/page).
+    
+    **Tool Available:**
+    - `ScrapeWebsiteTool`
 
-    We at {company} are more focused on {icp_description}.
-
-    Let's not spend much time in leads that are not a good fit for us.
-    Short answers from leads are a yellow flag
-
-
-    Lead Form Responses:
-    {form_response}
-
-
-    {product_name}:
-    {product_description}
+    **Instructions:**
+    1. Extract the full URL string from the '{website}' variable in the input context.
+    2. **Parse this URL to get only the scheme (e.g., 'https') and the base domain/netloc (e.g., 'www.example.com'). Ignore any path, query parameters, or fragments.**
+    3. **Construct the root URL** by combining the scheme and the base domain (e.g., 'https://www.example.com').
+    4. If a valid root URL was constructed, use `ScrapeWebsiteTool` with this *root URL only* to fetch the home page content. Handle potential scraping errors gracefully.
+    5. Analyze the scraped home page content (HTML) to find:
+        - Content of `<meta name="keywords">` tags.
+        - Content of `<meta name="description">` tag.
+        - Content of `<title>` tag.
+        - Store other relevant meta tags found in the metadata dictionary.
+    6. If the original '{website}' value is missing/invalid, or if a root URL cannot be constructed, or if scraping the root URL fails, return default empty values (empty metadata dict, empty seo_keywords list) without generating an error.
+    7. **Crucially: Do NOT include the full scraped HTML in the final output.**
+    
+    **Output Format:**
+    Return *only* a JSON object strictly matching the EnrichmentOutput model structure (metadata dict, seo_keywords list), reflecting data from the website's root/home page.
   expected_output: >
-    Highlighting key implict or explicit information from the lead's form
-    responses that can be used for further research and scoring.
-    We are looking for insights that can help us understand the lead's
-    industry, company, and potential use cases.
+    A validated JSON object conforming to the EnrichmentOutput model, containing website metadata and SEO keywords scraped *only from the root domain/home page* of the specific lead's website.
 
-research_task:
+focused_negative_signal_detection_task:
   description: >
-    Using the information gathered from the lead's data, conduct preliminary
-    research on the lead's industry, company background, and potential use
-    cases for {product_name}.
-    Focus on finding relevant data that can aid in scoring the lead and
-    planning a strategy to pitch them {product_name}.
+    **Goal:** Detect specific negative signals *for the company named '{company}'* using targeted sources.
+    
+    **Context:** You will receive input context containing lead details, including a '{company}' key.
+    
+    **Instructions:**
+    1. Extract the company name from the '{company}' variable in the input context.
+    2. Use 'Search and Contents Tool'.
+    3. Formulate specific search queries *incorporating the company name '{company}'* to target: Layoffs, Funding Rounds (failures/slowing), Hiring (reductions/restructuring), Product Launches (failures/delays), Negative Customer Feedback.
+       *Example Query Format:* `"{company} layoffs" site:glassdoor.com` OR `"{company} funding problems" site:techcrunch.com`
+    4. **Prioritize searching these sources:** `site:glassdoor.com`, `site:kununu.com`, `site:techcrunch.com`, `site:news.ycombinator.com`, `site:startbase.com`, `site:f6s.com`, `site:crunchbase.com`, general financial news.
+    5. Extract relevant signals that are *specifically about {company}* based only on search results. Ignore generic industry news.
+    6. For each relevant signal found, provide: signal_type, description, details (evidence), source, source_url.
+    7. **Crucially: Do NOT include raw search snippets/text in final output.**
+    8. **Error Handling:** If the 'Search and Contents Tool' fails (e.g., API error, network issue), do not stop. Log the failure internally if possible, and return an empty list `{{"detected_signals": []}}`.
 
-    Let's not spend much time in leads that are not a good fit for us.
-    Short answers from leads are a yellow flag.
-
-
-    Lead Form Responses:
-    {form_response}
-
-
-    {product_name}:
-    {product_description}
+    **Output Format:**
+    Return *only* a JSON object strictly matching the NegativeSignalDetectionOutput model structure.
+    Return an empty list `{{"detected_signals": []}}` if no specific signals about '{company}' are found or if the search tool fails.
   expected_output: >
-    A research report that includes:
-    - Industry overview and trends relevant to the lead's company.
-    - Company-specific information like size, market position, and recent news.
-    - Potential {product_name} use cases and benefits specific to the lead's industry and company.
-    - Any other insights that would aid in scoring and planning.
-    The report should be concise and actionable.
+    A validated JSON object conforming to the NegativeSignalDetectionOutput model, containing only negative signals specific to the company '{company}'.
 
-scoring_and_planning_task:
+focused_positive_signal_detection_task:
   description: >
-    Utilize the context and the lead's form response to score the lead.
-    Consider factors such as industry relevance, company size, specific {product_name}
-    use case potential, and readiness for partnership.
-    Take into account the wording used on the form response and how lenghty
-    the response was to score the lead.
-    Based on the score, suggest the most appropriate stratefy for the lead.
-    Integrate this information to outline how {company} and {product_name} can
-    specifically benefit this lead.
+    **Goal:** Detect specific positive growth signals *for the company named '{company}'* using targeted sources.
 
-    We are more focused on {icp_description}
+    **Context:** You will receive input context containing lead details, including a '{company}' key.
 
-    Let's not spend much time in leads that are not a good fit for us.
-    Smaller comapnies will want to pay less.
-    Short answers from leads are a yellow flag.
-    Let's be a little pessimistic and focus the high scores on deals that are
-    more likely to close and trully great.
+    **Instructions:**
+    1. Extract the company name from the '{company}' variable in the input context.
+    2. Use 'Search and Contents Tool'.
+    3. Formulate specific search queries *incorporating the company name '{company}'* to target: Funding Rounds (raised capital/amounts), Hiring (sprees/specific roles, check LinkedIn!), Product Launches (success/positive reviews), Positive Customer Feedback (growth/praise), Partnerships, New IP/Patents.
+       *Example Query Formats to Try:*
+       `"{company} funding round" site:techcrunch.com`
+       `"{company} hiring" site:linkedin.com`
+       `"{company} hiring" site:greenhouse.io | site:lever.co | site:jobs.ashbyhq.com` (Common ATS)
+       `intitle:"{company}" hiring site:linkedin.com/jobs`
+       `"{company} product launch"`
+       `"{company} partnership"`
+    4. **Prioritize searching these sources:** LinkedIn (especially jobs & company pages), TechCrunch, Crunchbase, company website/press releases, major ATS sites (Greenhouse, Lever, Ashby), Glassdoor.
+    5. Extract relevant signals that are *specifically about {company}* based *only* on search results. Ignore generic industry trends.
+    6. For each relevant signal found, provide: signal_type, description, details (evidence), source, source_url.
+    7. **Crucially: Do NOT include raw search snippets/text in final output.**
+    8. **Error Handling:** If the 'Search and Contents Tool' fails (e.g., API error, network issue), do not stop. Log the failure internally if possible, and return an empty list `{{"detected_signals": []}}`.
 
-
-    Lead Form Responses:
-    {form_response}
-
-
-    {product_name}:
-    {product_description}
+    **Output Format:**
+    Return *only* a JSON object strictly matching the PositiveSignalDetectionOutput model structure.
+    Return an empty list `{{"detected_signals": []}}` if no specific signals about '{company}' are found or if the search tool fails.
   expected_output: >
-    A comprehensive evaluation report for each lead that includes:
-    - A score from 0 to 10
-    - A tailored summary of how {company} and {product_name} can assist the lead.
-    - A list of talking points and ideas for an initial email and meeting, personalized for the lead.
-    This output should serve as a detailed guide for engaging with the lead effectively.
+    A validated JSON object conforming to the PositiveSignalDetectionOutput model, containing only positive signals specific to the company '{company}'.
+
+validate_signals_task:
+  description: >
+    **Goal:** Validate detected signals *for the specific company '{company}'* and assess overall confidence in their quality.
+
+    **Context:** Review the `detected_signals` lists from the outputs of `focused_positive_signal_detection_task` and `focused_negative_signal_detection_task`. You also have access to the original input context containing the target '{company}' name.
+    
+    **Instructions:**
+    1. Access the lists of positive and negative signals from context.
+    2. Extract the target company name from the '{company}' variable in the input context.
+    3. For each signal in both lists, evaluate its:
+        - Plausibility: Does the description make sense?
+        - Relevance: Is it a meaningful business signal AND *is it explicitly about or demonstrably linked to the target company '{company}'*? Discard generic industry signals.
+        - Uniqueness: Is it distinct from other signals in the list?
+        - Source Reliability (Optional Bonus): Briefly assess if the source seems credible.
+    4. Create new lists containing *only* the signals that pass validation (especially the relevance check for '{company}').
+    5. Based on the number and perceived quality/reliability of the *validated*, *company-specific* signals, determine an overall AI confidence score between 0.0 and 1.0. 
+       **Important:** If NO company-specific signals pass validation, assign a minimum confidence score of **0.3** to reflect uncertainty rather than certainty of absence. Otherwise, score between 0.3 and 1.0 based on the strength of validated signals.
+    6. Structure the output according to the ValidationTaskOutput model, including the validated signal lists (`validated_positive_signals`, `validated_negative_signals`) and the confidence score (`ai_confidence`).
+    
+    **Output Format:**
+    Return *only* a JSON object strictly matching the ValidationTaskOutput model structure.
+  expected_output: >
+    A validated JSON object conforming to the ValidationTaskOutput model, containing validated signal lists specific to '{company}' and an AI confidence score reflecting this specificity (minimum 0.3 if no specific signals found).

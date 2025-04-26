@@ -1,6 +1,6 @@
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, ForeignKey,
-    Boolean, Enum, text, Text, or_, func
+    Boolean, Enum, text, Text, or_, func, Float
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY as PG_ARRAY, UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
@@ -40,19 +40,16 @@ class LeadStage(enum.Enum):
     closed_won = 'closed_won'
     closed_lost = 'closed_lost'
 
-class UserProfile(Base):
-    __tablename__ = 'user_profiles'
+class Users(Base):
+    __tablename__ = 'users'
     __table_args__ = {'schema': 'public'}
 
-    user_id = Column(PG_UUID, primary_key=True) # Removed ForeignKey('auth.users.id')
-    username = Column(Text, nullable=False, unique=True)
-    full_name = Column(Text)
+    user_id = Column(PG_UUID, primary_key=True) 
+    first_name = Column(Text)
+    last_name = Column(Text)
     email = Column(Text, unique=True)
-    phone = Column(Text)
     company = Column(Text)
-    job_title = Column(Text)
-    region = Column(Text)
-    preferences = Column(JSONB)
+    position = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=text('now()'))
     updated_at = Column(DateTime(timezone=True), server_default=text('now()'))
 
@@ -67,14 +64,13 @@ class UserPreferences(Base):
     user_id = Column(PG_UUID, ForeignKey('auth.users.id', ondelete='CASCADE'), primary_key=True)
     selected_signals = Column(PG_ARRAY(Text), nullable=False)
     brand_voice = Column(Text, nullable=False)
-    target_audience = Column(Text, nullable=False)
     core_problem = Column(Text)
     solution_summary = Column(Text)
     differentiators = Column(PG_ARRAY(Text))
     icp_industry = Column(Text)
     icp_company_size = Column(Text)
     icp_region = Column(Text)
-    icp_job_title = Column(Text)
+    icp_role = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=text('now()'))
     updated_at = Column(DateTime(timezone=True), server_default=text('now()'))
 
@@ -106,6 +102,7 @@ class Lead(Base):
     __table_args__ = {'schema': 'public'}
 
     id = Column(PG_UUID, primary_key=True, server_default=text('gen_random_uuid()'))
+    user_id = Column(PG_UUID, ForeignKey('public.user_id', ondelete='CASCADE'), nullable=False)
     first_name = Column(Text)
     last_name = Column(Text)
     email = Column(Text)
@@ -117,7 +114,6 @@ class Lead(Base):
     lead_source = Column(Text)
     score = Column(Integer, default=0)
     last_contacted = Column(DateTime(timezone=True))
-    created_by = Column(PG_UUID, ForeignKey('public.user_profiles.user_id'))
     phone = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=text('now()'))
     linkedin = Column(Text)
@@ -125,24 +121,22 @@ class Lead(Base):
     notes = Column(Text)
     languages = Column(PG_ARRAY(Text))
     updated_at = Column(DateTime(timezone=True), server_default=text('now()'))
-    suggested_action = Column(Text)
     last_suggestion_id = Column(PG_UUID)
     new_since = Column(DateTime(timezone=True), server_default=text('now()'))
     connection_degree = Column(Integer)
-    needs_nurturing = Column(Boolean, default=True)
-    priority = Column(Enum(LeadStatus, name='lead_status', schema='public'))
-    stage = Column(Enum(LeadStage, name='lead_stage', schema='public'), default=LeadStage.new)
+    lead_status = Column(Enum(LeadStatus, name='lead_status', schema='public'))
+    lead_stage = Column(Enum(LeadStage, name='lead_stage', schema='public'), default=LeadStage.new)
     enrichment_data = Column(JSONB)
     is_enriched = Column(Boolean, default=False)
-    scoring_details = Column(Text)
+    scoring_details = Column(JSONB, nullable=True)
     
     # Relationship with signals (defined here, after Signal class)
     signals = relationship("Signal", back_populates="lead")
     # Relationship with creator profile (defined here, after UserProfile class)
-    creator = relationship("UserProfile", back_populates="leads_created")
+    creator = relationship("Users", back_populates="leads_created")
 
 # Define back-populating relationships after all classes are defined
-UserProfile.leads_created = relationship("Lead", back_populates="creator")
+Users.leads_created = relationship("Lead", back_populates="creator")
 Signal.lead = relationship("Lead", back_populates="signals")
 
 # Create session factory
@@ -261,7 +255,7 @@ def update_user_preferences(user_id: PG_UUID, **pref_data):
     finally:
         db.close()
 
-def get_unprocessed_lead_ids(user_id: PG_UUID, limit: int = 20):
+def get_unprocessed_lead_ids(user_id: PG_UUID, limit: int = 5):
     """Fetches the IDs of leads for a user that have not yet been scored (score is NULL or 0)."""
     db = SessionLocal()
     try:
@@ -270,7 +264,7 @@ def get_unprocessed_lead_ids(user_id: PG_UUID, limit: int = 20):
         # Filter leads that either:
         # 1. Have NULL score (never processed)
         # 2. Have score = 0 (default value)
-        # 3. AND belong to the given user (if created_by is the user relationship)
+        # 3. AND belong to the given user (using the correct user_id column)
         lead_ids = db.query(Lead.id)\
             .filter(
                 or_(
@@ -278,7 +272,7 @@ def get_unprocessed_lead_ids(user_id: PG_UUID, limit: int = 20):
                     Lead.score == 0
                 )
             )\
-            .filter(Lead.created_by == user_id)\
+            .filter(Lead.user_id == user_id)\
             .limit(limit)\
             .all()
             
@@ -288,29 +282,29 @@ def get_unprocessed_lead_ids(user_id: PG_UUID, limit: int = 20):
         db.close()
 
 # --- NEW FUNCTION for Summary ---
-def get_lead_priority_summary(user_id: PG_UUID) -> dict:
-    """Calculates the count of leads for a user, grouped by their priority status."""
+def get_lead_status_summary(user_id: PG_UUID) -> dict:
+    """Calculates the count of leads for a user, grouped by their status."""
     db = SessionLocal()
     try:
         # Query counts grouped by priority enum value
         # Filters by the user who created the lead
         summary = db.query(
-                Lead.priority,
+                Lead.lead_status,
                 func.count(Lead.id).label('count')
             )\
-            .filter(Lead.created_by == user_id)\
-            .group_by(Lead.priority)\
+            .filter(Lead.user_id == user_id)\
+            .group_by(Lead.lead_status)\
             .all()
 
         # Convert the result (list of tuples) into a dictionary
         # Handles cases where a priority might have 0 leads (won't appear in query result)
         summary_dict = {
-            priority.name: 0 for priority in LeadStatus # Initialize all statuses to 0
+            status.name: 0 for status in LeadStatus # Initialize all statuses to 0
         }
-        for priority_enum, count in summary:
-            if priority_enum: # Ensure priority is not NULL
-                 summary_dict[priority_enum.name] = count
-            # Optionally handle NULL priority leads if needed:
+        for status_enum, count in summary:
+            if status_enum: # Ensure status is not NULL
+                 summary_dict[status_enum.name] = count
+            # Optionally handle NULL status leads if needed:
             # else:
             #    summary_dict['unknown'] = count 
 

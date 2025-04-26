@@ -30,14 +30,13 @@ def save_user_preferences(
     user_id: str,
     selected_signals: List[str],
     brand_voice: str,
-    target_audience: str,
     core_problem: Optional[str] = None,
     solution_summary: Optional[str] = None,
     differentiators: Optional[List[str]] = None,
     icp_industry: Optional[str] = None,
     icp_company_size: Optional[str] = None,
     icp_region: Optional[str] = None,
-    icp_job_title: Optional[str] = None
+    icp_role: Optional[str] = None
 ) -> Dict:
     """
     Save or update user preferences for lead scoring
@@ -46,14 +45,13 @@ def save_user_preferences(
         user_id=user_id,
         selected_signals=selected_signals,
         brand_voice=brand_voice,
-        target_audience=target_audience,
         core_problem=core_problem,
         solution_summary=solution_summary,
         differentiators=differentiators,
         icp_industry=icp_industry,
         icp_company_size=icp_company_size,
         icp_region=icp_region,
-        icp_job_title=icp_job_title
+        icp_role=icp_role
     )
 
 def get_user_preferences(user_id: str) -> Dict:
