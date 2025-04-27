@@ -27,13 +27,13 @@ class LeadScoringCrew:
     def _determine_lead_status(self, score: float) -> LeadStatus:
         """Determine lead status based on score"""
         if score >= 85:
-            return LeadStatus.MONEY
+            return LeadStatus.money
         elif score >= 60:
-            return LeadStatus.HOT
+            return LeadStatus.hot
         elif score >= 40:
-            return LeadStatus.WARM
+            return LeadStatus.warm
         else:
-            return LeadStatus.COLD
+            return LeadStatus.cold
 
     def _get_lead_data(self, lead_id: str, user_id: str) -> Dict:
         """Fetches lead data from the database.
@@ -190,13 +190,14 @@ class LeadScoringCrew:
         
         # Process validated positive signals
         positive_signals_output = validation_output.validated_positive_signals
-        if positive_signals_output and isinstance(positive_signals_output, PositiveSignalDetectionOutput) and positive_signals_output.detected_signals:
-            logging.info(f"Processing {len(positive_signals_output.detected_signals)} validated positive signals for Lead ID {lead_id}.")
+        if positive_signals_output:
+            logging.info(f"Processing {len(positive_signals_output[0].detected_signals)} validated positive signals for Lead ID {lead_id}.")
             stored_count = 0
-            for signal_item in positive_signals_output.detected_signals:
-                if not isinstance(signal_item, PositiveSignalOutput):
-                    logging.warning(f"Skipping invalid item in positive signal list: {signal_item} for Lead ID {lead_id}.")
-                    continue
+            if len(positive_signals_output) > 0:
+                for signal_item in positive_signals_output[0].detected_signals:
+                    if not isinstance(signal_item, PositiveSignalOutput):
+                        logging.warning(f"Skipping invalid item in positive signal list: {signal_item} for Lead ID {lead_id}.")
+                        continue
                 try:
                     # Access attributes directly
                     source_url_str = str(signal_item.source_url) if signal_item.source_url else None
@@ -216,34 +217,35 @@ class LeadScoringCrew:
                     logging.error(f"Database error storing positive signal for Lead ID {lead_id}: {db_err}. Signal data: {signal_item.model_dump()}", exc_info=True)
             logging.info(f"Stored {stored_count} validated positive signals for Lead ID {lead_id}.")
         else:
-             logging.info(f"No validated positive signals found for Lead ID {lead_id}.")
+             logging.info(f"No validated positive signals found for Lead ID {lead_id}. Validation output: {validation_output}")
 
         # Process validated negative signals
         negative_signals_output = validation_output.validated_negative_signals
-        if negative_signals_output and isinstance(negative_signals_output, NegativeSignalDetectionOutput) and negative_signals_output.detected_signals:
-            logging.info(f"Processing {len(negative_signals_output.detected_signals)} validated negative signals for Lead ID {lead_id}.")
+        if negative_signals_output:
+            logging.info(f"Processing {len(negative_signals_output[0].detected_signals)} validated negative signals for Lead ID {lead_id}.")
             stored_count = 0
-            for signal_item in negative_signals_output.detected_signals:
-                 if not isinstance(signal_item, NegativeSignalOutput):
-                    logging.warning(f"Skipping invalid item in negative signal list: {signal_item} for Lead ID {lead_id}.")
-                    continue
-                 try:
-                    # Access attributes directly
-                    source_url_str = str(signal_item.source_url) if signal_item.source_url else None
-                    detected_at_val = signal_item.detected_at
+            if len(negative_signals_output) > 0:
+                for signal_item in negative_signals_output[0].detected_signals:
+                    if not isinstance(signal_item, NegativeSignalOutput):
+                        logging.warning(f"Skipping invalid item in negative signal list: {signal_item} for Lead ID {lead_id}.")
+                        continue
+                    try:
+                       # Access attributes directly
+                       source_url_str = str(signal_item.source_url) if signal_item.source_url else None
+                       detected_at_val = signal_item.detected_at
 
-                    create_signal(
-                        lead_id=lead_uuid, user_id=user_uuid,
-                        signal_type=signal_item.signal_type,
-                        description=signal_item.description,
-                        details=signal_item.details,
-                        source=signal_item.source,
-                        source_url=source_url_str,
-                        detected_at=detected_at_val
-                    )
-                    stored_count += 1
-                 except Exception as db_err:
-                    logging.error(f"Database error storing negative signal for Lead ID {lead_id}: {db_err}. Signal data: {signal_item.model_dump()}", exc_info=True)
+                       create_signal(
+                           lead_id=lead_uuid, user_id=user_uuid,
+                           signal_type=signal_item.signal_type,
+                           description=signal_item.description,
+                           details=signal_item.details,
+                           source=signal_item.source,
+                           source_url=source_url_str,
+                           detected_at=detected_at_val
+                       )
+                       stored_count += 1
+                    except Exception as db_err:
+                       logging.error(f"Database error storing negative signal for Lead ID {lead_id}: {db_err}. Signal data: {signal_item.model_dump()}", exc_info=True)
             logging.info(f"Stored {stored_count} validated negative signals for Lead ID {lead_id}.")
         else:
              logging.info(f"No validated negative signals found for Lead ID {lead_id}.")
@@ -338,18 +340,23 @@ class LeadScoringCrew:
             
             if validation_raw_output:
                 try:
+                    print(f"Validation raw output: {validation_raw_output}")
                     # CrewAI raw output might be a string or dict, handle both
                     if isinstance(validation_raw_output, str):
+                        print(f"Validation raw output is a string: {validation_raw_output}")
                         validation_output = ValidationTaskOutput.model_validate_json(validation_raw_output)
                     elif isinstance(validation_raw_output, dict):
-                         validation_output = ValidationTaskOutput.model_validate(validation_raw_output)
+                        print(f"Validation raw output is a dict: {validation_raw_output}")
+                        validation_output = ValidationTaskOutput.model_validate(validation_raw_output)
                     else:
-                         logging.error(f"Validator output for {test_lead_id} is unexpected type: {type(validation_raw_output)}")
+                        print(f"Validation raw output is an unexpected type: {type(validation_raw_output)}")
+                        logging.error(f"Validator output for {test_lead_id} is unexpected type: {type(validation_raw_output)}")
                     
                     if validation_output:
                         logging.info(f"Successfully parsed ValidationTaskOutput for {test_lead_id}")
                         
                 except Exception as parse_err:
+                    print(f"Failed to parse validator output for {test_lead_id}. Error: {parse_err}")
                     logging.error(f"Failed to parse validator output for {test_lead_id}. Error: {parse_err}. Raw: {validation_raw_output}")
                     # Keep validation_output as None
             else:
@@ -408,25 +415,25 @@ class LeadScoringCrew:
              crew_execution_error = "Signal validation did not produce valid output for scoring."
         
         # --- 5. Store Results (Signals and Lead Update) --- (REMOVED FOR TESTING)
-        # try:
-        #     # Store validated signals
-        #     logging.info(f"Storing validated signals for Lead ID {test_lead_id}")
-        #     self._process_and_store_signals(validation_output, test_lead_id, user_preferences.get('user_id', 'test_user')) # Use test IDs
-        #     
-        #     # Update lead record (pass scoring model, components, and confidence)
-        #     logging.info(f"Updating lead details in DB for Lead ID {test_lead_id}")
-        #     self._update_lead_in_db(
-        #         lead_id=test_lead_id, 
-        #         user_id=user_preferences.get('user_id', 'test_user'), 
-        #         enrichment_output=enrichment_output, 
-        #         scoring_output=scoring_output_model, # Pass the model from deterministic calc
-        #         component_scores=component_scores_dict, # Pass the components dict
-        #         ai_confidence=ai_confidence_score # Pass confidence from validation
-        #     )
-        # except Exception as db_e:
-        #      logging.error(f"Error during final database updates for Lead ID {test_lead_id}: {db_e}", exc_info=True)
-        #      if not crew_execution_error:
-        #          crew_execution_error = f"Database update failed after processing: {str(db_e)}"
+        try:
+            # Store validated signals
+            logging.info(f"Storing validated signals for Lead ID {test_lead_id}")
+            self._process_and_store_signals(validation_output, test_lead_id, user_preferences.get('user_id', 'test_user')) # Use test IDs
+            
+            # Update lead record (pass scoring model, components, and confidence)
+            logging.info(f"Updating lead details in DB for Lead ID {test_lead_id}")
+            self._update_lead_in_db(
+                lead_id=test_lead_id, 
+                user_id=user_preferences.get('user_id', 'test_user'), 
+                enrichment_output=enrichment_output, 
+                scoring_output=scoring_output_model, # Pass the model from deterministic calc
+                component_scores=component_scores_dict, # Pass the components dict
+                ai_confidence=ai_confidence_score # Pass confidence from validation
+            )
+        except Exception as db_e:
+             logging.error(f"Error during final database updates for Lead ID {test_lead_id}: {db_e}", exc_info=True)
+             if not crew_execution_error:
+                  crew_execution_error = f"Database update failed after processing: {str(db_e)}"
 
         # --- 6. Return Final Result --- 
         if crew_execution_error:
@@ -468,8 +475,8 @@ class LeadScoringCrew:
         self,
         lead_data: Dict,
         user_preferences: Dict,
-        validated_positive_signals: Optional[PositiveSignalDetectionOutput],
-        validated_negative_signals: Optional[NegativeSignalDetectionOutput],
+        validated_positive_signals: Optional[List[PositiveSignalDetectionOutput]],
+        validated_negative_signals: Optional[List[NegativeSignalDetectionOutput]],
         ai_confidence: float # Get confidence from validator task
     ) -> Tuple[ScoringOutput, Dict[str, Any]]:
         """
@@ -602,13 +609,14 @@ class LeadScoringCrew:
         num_pos_signals = 0
         num_strong_pos_signals = 0
         if validated_positive_signals and isinstance(validated_positive_signals, PositiveSignalDetectionOutput):
-            num_pos_signals = len(validated_positive_signals.detected_signals)
-            for signal in validated_positive_signals.detected_signals:
-                if signal.signal_type in STRONG_SIGNALS["positive"]:
-                     pos_signal_points += STRONG_POS_POINTS
-                     num_strong_pos_signals += 1
-                else:
-                     pos_signal_points += NORMAL_POS_POINTS
+            if len(validated_positive_signals) > 0:
+                num_pos_signals = len(validated_positive_signals[0].detected_signals)
+                for signal in validated_positive_signals[0].detected_signals:
+                    if signal.signal_type in STRONG_SIGNALS["positive"]:
+                         pos_signal_points += STRONG_POS_POINTS
+                         num_strong_pos_signals += 1
+                    else:
+                         pos_signal_points += NORMAL_POS_POINTS
         
         # Cap the score contribution
         capped_pos_signal_score = min(pos_signal_points, MAX_POS_SIGNAL_SCORE)

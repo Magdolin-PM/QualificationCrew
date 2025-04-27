@@ -13,46 +13,46 @@ from datetime import datetime
 
 # Pydantic model for a single detected signal
 class PositiveSignalOutput(BaseModel):
-    signal_type: str = Field(..., description="Type: funding, hiring, expansion, partnership, etc.")
-    description: str = Field(..., description="A concise description of the signal.")
-    details: Dict[str, Any] = Field(default={}, description="Supporting details or evidence for the signal, as a JSON object.")
-    source: str = Field(..., description="The source where the signal was detected (e.g., 'website', 'news_article', 'series_funding', 'cxo_hiring', 'job_posting').")
-    source_url: Optional[HttpUrl | str] = Field(default=None, description="The URL of the source, if available.") # Allow string for flexibility if URL is not standard
-    detected_at: Optional[datetime | str] = Field(default=None, description="Timestamp when the signal was detected (ISO 8601 format preferred).") # Allow string for flexibility
+    signal_type: Optional[str] = Field(default="", description="Type: funding, hiring, expansion, partnership, etc.")
+    description: Optional[str] = Field(default="", description="A concise description of the signal.")
+    details: Optional[Dict[str, Any]] = Field(default={}, description="Supporting details or evidence for the signal, as a JSON object.")
+    source: Optional[str] = Field(default="", description="The source where the signal was detected (e.g., 'website', 'news_article', 'series_funding', 'cxo_hiring', 'job_posting').")
+    source_url: Optional[HttpUrl | str] = Field(default="", description="The URL of the source, if available.") # Allow string for flexibility if URL is not standard
+    detected_at: Optional[datetime | str] = Field(default=datetime.now(), description="Timestamp when the signal was detected (ISO 8601 format preferred).") # Allow string for flexibility
     confidence: Optional[float] = Field(0.7, ge=0.0, le=1.0, description="Confidence in signal accuracy based on source and content")
 
 # Pydantic model for the output of signal detection tasks
 class PositiveSignalDetectionOutput(BaseModel):
-    detected_signals: List[PositiveSignalOutput] = Field(default=[], description="A list of detected positive signals.")
+    detected_signals: Optional[List[PositiveSignalOutput]] = Field(default=[], description="A list of detected positive signals.")
 
 class NegativeSignalOutput(BaseModel):
-    signal_type: str = Field(..., description="Type: layoffs, negative_reviews, financial_trouble, etc.")
-    description: str = Field(..., description="A concise description of the signal.")
-    details: Dict[str, Any] = Field(default={}, description="Supporting details or evidence for the signal, as a JSON object.")
-    source: str = Field(..., description="The source where the signal was detected (e.g., 'website', 'news_article', 'job_posting', 'delisting_notice').")
-    source_url: Optional[HttpUrl | str] = Field(default=None, description="The URL of the source, if available.")
-    detected_at: Optional[datetime | str] = Field(default=None, description="Timestamp when the signal was detected (ISO 8601 format preferred).") # Allow string for flexibility
+    signal_type: Optional[str] = Field(default="", description="Type: layoffs, negative_reviews, financial_trouble, etc.")
+    description: Optional[str] = Field(default="", description="A concise description of the signal.")
+    details: Optional[Dict[str, Any]] = Field(default={}, description="Supporting details or evidence for the signal, as a JSON object.")
+    source: Optional[str] = Field(default="", description="The source where the signal was detected (e.g., 'website', 'news_article', 'job_posting', 'delisting_notice').")
+    source_url: Optional[HttpUrl | str] = Field(default="", description="The URL of the source, if available.")
+    detected_at: Optional[datetime | str] = Field(default=datetime.now(), description="Timestamp when the signal was detected (ISO 8601 format preferred).") # Allow string for flexibility
     confidence: Optional[float] = Field(0.7, ge=0.0, le=1.0, description="Confidence in signal accuracy based on source and content")
 
 class NegativeSignalDetectionOutput(BaseModel):
-    detected_signals: List[NegativeSignalOutput] = Field(default=[], description="A list of detected negative signals.")
+    detected_signals: Optional[List[NegativeSignalOutput]] = Field(default=[], description="A list of detected negative signals.")
 
 # Refined Pydantic model for the output of the enrichment task (SEO/Metadata only)
 class EnrichmentOutput(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default={}, description="Extracted website metadata (e.g., title, description tags).")
-    seo_keywords: List[str] = Field(default=[], description="Relevant SEO keywords identified from website metadata.")
+    seo_keywords: Optional[List[str]] = Field(default=[], description="Relevant SEO keywords identified from website metadata.")
 
 # NEW Pydantic model for the output of the signal validation task
 class ValidationTaskOutput(BaseModel):
-    validated_positive_signals: PositiveSignalDetectionOutput = Field(...) # Use the existing detection output model
-    validated_negative_signals: NegativeSignalDetectionOutput = Field(...) # Use the existing detection output model
-    ai_confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score (0.0-1.0) in the quality and relevance of the validated signals.")
+    validated_positive_signals: Optional[List[PositiveSignalDetectionOutput]] = Field(...) # Use the existing detection output model
+    validated_negative_signals: Optional[List[NegativeSignalDetectionOutput]] = Field(...) # Use the existing detection output model
+    ai_confidence: Optional[float] = Field(..., ge=0.0, le=1.0, description="Confidence score (0.0-1.0) in the quality and relevance of the validated signals.")
 
 # Updated Pydantic model for the final deterministic scoring output
 class ScoringOutput(BaseModel):
-    score: float = Field(..., ge=0, le=100, description="The calculated lead score (0-100).")
-    reasoning: str = Field(..., description="Detailed explanation of how the score was calculated, referencing signals and ICP match.")
-    ai_confidence: float = Field(..., ge=0.0, le=1.0, description="AI's confidence score (0.0-1.0) based on the quality of input signals used for scoring.")
+    score: Optional[float] = Field(..., ge=0, le=100, description="The calculated lead score (0-100).")
+    reasoning: Optional[str] = Field(..., description="Detailed explanation of how the score was calculated, referencing signals and ICP match.")
+    ai_confidence: Optional[float] = Field(..., ge=0.0, le=1.0, description="AI's confidence score (0.0-1.0) based on the quality of input signals used for scoring.")
     # Include raw outputs if needed for debugging/storage, otherwise keep it clean
     # enrichment_data_raw: Optional[str] = None
     # positive_signals_raw: Optional[str] = None

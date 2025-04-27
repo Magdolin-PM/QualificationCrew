@@ -74,6 +74,22 @@ class UserPreferences(Base):
     created_at = Column(DateTime(timezone=True), server_default=text('now()'))
     updated_at = Column(DateTime(timezone=True), server_default=text('now()'))
 
+    def to_dict(self):
+        return {
+            "user_id": str(self.user_id),
+            "selected_signals": self.selected_signals,
+            "brand_voice": self.brand_voice,
+            "core_problem": self.core_problem,
+            "solution_summary": self.solution_summary,
+            "differentiators": self.differentiators,
+            "icp_industry": self.icp_industry,
+            "icp_company_size": self.icp_company_size,
+            "icp_region": self.icp_region,
+            "icp_role": self.icp_role,
+            "created_at": str(self.created_at),
+            "updated_at": str(self.updated_at)
+        }
+
 # Define Signal before Lead
 class Signal(Base):
     __tablename__ = 'signals'
@@ -129,11 +145,44 @@ class Lead(Base):
     enrichment_data = Column(JSONB)
     is_enriched = Column(Boolean, default=False)
     scoring_details = Column(JSONB, nullable=True)
+    ai_confidence = Column(Float)
     
     # Relationship with signals (defined here, after Signal class)
     signals = relationship("Signal", back_populates="lead")
     # Relationship with creator profile
     creator = relationship("Users", back_populates="leads_created")
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "company": self.company,
+            "email": self.email,
+            "position": self.position,
+            "company_size": self.company_size,
+            "industry": self.industry,
+            "region": self.region,
+            "lead_source": self.lead_source,
+            "score": self.score,
+            "last_contacted": str(self.last_contacted),
+            "phone": self.phone,
+            "created_at": str(self.created_at),
+            "linkedin": self.linkedin,
+            "website": self.website,
+            "notes": self.notes,
+            "languages": self.languages,
+            "updated_at": str(self.updated_at),
+            "last_suggestion_id": str(self.last_suggestion_id),
+            "new_since": str(self.new_since),
+            "connection_degree": self.connection_degree,
+            "lead_status": self.lead_status.value if self.lead_status else None,
+            "lead_stage": self.lead_stage.value if self.lead_stage else None,
+            "enrichment_data": self.enrichment_data,
+            "is_enriched": self.is_enriched,
+            "scoring_details": self.scoring_details,
+            "user_id": str(self.user_id),
+        }
 
 # Define back-populating relationships after all classes are defined
 Users.leads_created = relationship("Lead", back_populates="creator")
