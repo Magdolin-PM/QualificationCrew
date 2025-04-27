@@ -8,6 +8,7 @@ import sys
 from dotenv import load_dotenv
 from pydantic import BaseModel # Import BaseModel
 from typing import List, Dict, Any # Import typing helpers
+from sqlalchemy import or_ # Import or_
 
 # --- Define Project Root and Add to Path ---
 # Assuming this script is in crewAI-enterprise-lead-ql-assist/that's the one/crewai_plus_lead_scoring/
@@ -104,6 +105,22 @@ class BatchStartResponse(BaseModel):
     user_id: str
     leads_queued: int
 
+
+def get_lead_by_id(lead_id: UUID):
+    from .database import SessionLocal, Lead # Relative import
+    db = SessionLocal()
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    db.close()
+    # Return a dict of the lead
+    return lead
+
+def get_user_preferences(user_id: UUID):
+    from .database import SessionLocal, UserPreferences # Relative import
+    db = SessionLocal()
+    user_preferences = db.query(UserPreferences).filter(UserPreferences.user_id == user_id).first()
+    db.close()
+    return user_preferences
+
 # --- Background Task Function ---
 # This function will run in the background
 def run_scoring_batch_background(
@@ -124,6 +141,13 @@ def run_scoring_batch_background(
         logging.error(f"[Background Task] Failed to initialize LeadScoringCrew for User ID {user_id_str}: {e}", exc_info=True)
         # Cannot easily report back to user here, rely on logs.
         return # Stop processing if crew cannot be initialized
+    
+    try:
+        user_id = UUID(user_id_str)
+    except ValueError:
+        logging.error(f"[Background Task] Invalid user ID format: {user_id_str}")
+        return # Stop processing if user ID is invalid
+
         
     processed_count = 0
     success_count = 0
@@ -132,10 +156,13 @@ def run_scoring_batch_background(
     for lead_id in lead_ids_to_process:
         lead_id_str = str(lead_id)
         logging.info(f"[Background Task] Processing lead {lead_id_str} for User ID {user_id_str}...")
+        # Get lead data and user preferences
+        lead_data = get_lead_by_id(lead_id=lead_id)
+        user_preferences = get_user_preferences(user_id=user_id)
         try:
             result = crew.process_single_lead(
-                lead_id=lead_id_str, 
-                user_id=user_id_str,
+                lead_data=lead_data.to_dict(),
+                user_preferences=user_preferences.to_dict(),
                 contacts_data=contacts_list_of_dicts
             )
             processed_count += 1
@@ -377,6 +404,46 @@ async def get_user_lead_summary(user_id_str: str):
         logging.error(f"Database error fetching lead summary for User ID {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error fetching lead summary from database.")
 # --- END NEW Summary Endpoint ---
+
+# Expected query params:
+# q: str,
+# user_id: UUID,
+@app.get("/api/leads/search")
+async def search_leads(
+    q: str,
+    user_id: str
+):
+    
+    from .database import SessionLocal, Lead # Relative import
+    db = SessionLocal()
+    try:
+        # Validate query parameter
+        if not q:
+            raise HTTPException(status_code=400, detail="Query parameter 'q' is required.")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Query parameter 'user_id' is required.")
+        try:
+            user_id = UUID(user_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid user ID format: {user_id}")
+        leads = db.query(Lead) \
+            .filter(Lead.user_id == user_id) \
+            .filter(
+                or_(
+                    Lead.first_name.ilike(f"%{q}%"),
+                    Lead.last_name.ilike(f"%{q}%"),
+                    Lead.company.ilike(f"%{q}%"),
+                    Lead.email.ilike(f"%{q}%")
+            )
+        ).all()
+        return leads
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Error searching leads: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error searching leads.")
+    finally:
+        db.close()
 
 # --- How to run ---
 # You would typically run this using an ASGI server like uvicorn:
