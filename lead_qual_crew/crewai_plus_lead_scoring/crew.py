@@ -152,6 +152,17 @@ class LeadScoringCrew:
                 logging.error(f"Database error updating lead {lead_id} (context user {user_id}): {e}", exc_info=True)
         else:
             logging.warning(f"No data to update in database for Lead ID {lead_id}.")
+        
+    def _trigger_outreach_crew(self, lead_id: str, user_id: str):
+        """Trigger the outreach crew for a lead"""
+        # API endpoint
+        API_URL = "http://localhost:9000/api/run"
+        payload = {
+            "user_id": user_id,  # Example user ID
+            "lead_ids": [lead_id],  # Single lead ID or list of lead IDs
+        }
+        response = requests.post(API_URL, json=payload)
+        print(f"Outreach crew triggered for lead {lead_id}. Response: {response.json()}")
 
     def _clean_json_output(self, text: str) -> str:
         """Clean up LLM output to extract valid JSON from markdown or text."""
@@ -430,6 +441,7 @@ class LeadScoringCrew:
                 component_scores=component_scores_dict, # Pass the components dict
                 ai_confidence=ai_confidence_score # Pass confidence from validation
             )
+            self._trigger_outreach_crew(lead_id=test_lead_id, user_id=user_preferences.get('user_id', 'test_user'))
         except Exception as db_e:
              logging.error(f"Error during final database updates for Lead ID {test_lead_id}: {db_e}", exc_info=True)
              if not crew_execution_error:
